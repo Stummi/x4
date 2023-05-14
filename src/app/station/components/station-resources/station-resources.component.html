@@ -12,9 +12,9 @@
       <td>
         <i *ngIf="!item.expanded" class="fa fa-angle-double-down"></i>
         <i *ngIf="item.expanded" class="fa fa-angle-double-up"></i>
-        <span [ngClass]="{ 'text-danger': item.amount < 0, 'text-success': item.amount > 0 }"> {{ item.ware.name }}</span>
+        <span [ngClass]="{ 'text-danger': item.amount < -0.01, 'text-success': item.amount > 0.01 }"> {{ item.ware.name }}</span>
       </td>
-      <td class="text-right" [ngClass]="{ 'text-danger': item.amount < 0, 'text-success': item.amount > 0 }">{{ item.amount | number:'1.0-0' }}</td>
+      <td class="text-right" [ngClass]="{ 'text-danger': item.amount < -0.01, 'text-success': item.amount > 0.01 }">{{ item.amount | number:'1.0-0' }}</td>
     </tr>
     <ng-container *ngIf="item.expanded">
       <tr *ngFor="let moduleRes of item.items" [ngClass]="{'text-danger': moduleRes.total < 0, 'text-success': moduleRes.total > 0 }">

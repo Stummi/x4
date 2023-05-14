@@ -54,6 +54,7 @@ export class StationModuleModel {
 
     private _count: number;
     private _moduleId: string;
+    private _auto: boolean;
 
     constructor(private wareService: WareService, private moduleService: ModuleService, moduleId: string = '', count: number = 1) {
         this.moduleId = moduleId;
@@ -69,6 +70,14 @@ export class StationModuleModel {
             this._moduleId = value;
             this.update();
         }
+    }
+
+    get auto() {
+        return this._auto;
+    }
+
+    set auto(value: boolean) {
+        this._auto = value;
     }
 
     get count() {
@@ -152,8 +161,37 @@ export class ResourceCalculator {
         return { value: totalWorkforce, capacity: workforce };
     }
 
-    static calculate(modules: StationModuleModel[], sunlight: number, partialWorkforce: number) {
-        let work = this.calculateWorkforce(modules);
+    static sortModules(modules: StationModuleModel[]): StationModuleModel[] {
+        const ret: StationModuleModel[] = modules.filter(mod => mod.module.type == ModuleTypes.habitation);
+        let remainingModules = modules.filter(mod => mod.module.type != ModuleTypes.habitation);
+
+        while (remainingModules.length > 0) {
+
+            // find all modules in `remainingModules` which do not produce something that another module in remaining
+            // modules is dependend on
+            const next = remainingModules.filter(candidate =>
+                candidate.production.every(production =>
+                    remainingModules.every(candidateModule =>
+                        candidateModule.needs.every(
+                            need => need.ware != production.ware
+                        )
+                    )
+                )
+            );
+
+            ret.push(...next);
+            remainingModules = remainingModules.filter(mod => !ret.includes(mod));
+        }
+
+        return ret;
+    }
+
+    static calculate(inpModules: StationModuleModel[], sunlight: number, partialWorkforce: number) {
+        const modules = ResourceCalculator.sortModules(inpModules.filter(
+            mod => mod.module != null
+        ));
+
+        const work = this.calculateWorkforce(modules);
 
         let multiplier = (work.capacity == 0 || work.value == 0) ? 0 : (partialWorkforce / work.value);
 
@@ -161,19 +199,32 @@ export class ResourceCalculator {
             multiplier = 1;
         }
 
+        let needByResource = {};
         let data = {};
         if (modules.length > 0) {
             data = modules
                 .map<WareProductionData[]>(x => {
-                    let modifier = 1
-                    if(x.module?.type === "Habitation") {
-                        let capacity = x.module.workForce.capacity * x.count
-                        if(partialWorkforce >= capacity) {
-                            partialWorkforce -= capacity
+                    let modifier = 1;
+                    if (x.module?.type === 'Habitation') {
+                        const capacity = x.module.workForce.capacity * x.count;
+                        if (partialWorkforce >= capacity) {
+                            partialWorkforce -= capacity;
                         } else {
-                            modifier = partialWorkforce / capacity
-                            partialWorkforce = 0
+                            modifier = partialWorkforce / capacity;
+                            partialWorkforce = 0;
                         }
+                    }
+
+                    if (x.auto && x.production.length > 0) {
+                        const production = x.production[0];
+                        const producedWare = production.ware.id;
+                        const need = needByResource[producedWare] || 0;
+                        const effect = production.value.effects ? production.value.effects.find(e => e.type == Effects.work) : null;
+                        const efficiency = effect == null ? 1 : (1 + effect.product * multiplier);
+
+                        const c = -need / (production.amount * efficiency);
+                        x.count = Math.ceil(c);
+                        modifier = c / Math.ceil(c);
                     }
 
                     const values: StationResourceItemModel[] = x.needs
@@ -188,10 +239,17 @@ export class ResourceCalculator {
                             })
                         );
 
+                    values.forEach(val => {
+                        const needEntry = (needByResource[val.ware.id] || 0) + val.total;
+                        needByResource[val.ware.id] = needEntry;
+                    });
+                    console.log(needByResource);
+
                     if (x.production) {
                         for (let production of x.production) {
                             const effect = production.value.effects ? production.value.effects.find(e => e.type == Effects.work) : null;
                             let efficiency = effect == null ? 1 : (1 + effect.product * multiplier);
+                            efficiency *= modifier;
 
                             if (production.ware.id === Wares.energycells.id) {
                                 // add sunlight for energy cells
